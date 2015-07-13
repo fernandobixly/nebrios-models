@@ -150,3 +150,6 @@ class NebriOSModel(object):
 
     def __str__(self):
         return "<%s id %s>" % (self.__class__.__name__, self.process().PROCESS_ID)
+
+    def __repr__(self):
+        return str(self)
