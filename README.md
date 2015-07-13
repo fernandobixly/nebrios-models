@@ -33,6 +33,31 @@ class MyUser(NebriOSModel):
 
 class MyCar(NebriOSModel):
 
-    kind = 'car'
+    kind = 'mycar'
     user = NebriOSReference(MyUser, required=True)
+    license_plate = NebriOSField(required=True)
+```
+
+### Model usage
+
+Regular model usage
+```
+>>> user = MyUser(username="testuser")
+>>> user.set_password("test_password")
+>>> user.save()
+>>> user.validate_password("wrong_password")
+False
+>>> user.validate_password("test_password")
+True
+```
+
+Referencing other model instances
+```
+>>> car = MyCar(user=user, license_plate="ABC123")
+>>> car.user
+<MyUser id 342>
+>>> car.user = None
+>>> car.save()  # This raises an exception, because the field user is required
+>>> car.user = user
+>>> car.save()
 ```
