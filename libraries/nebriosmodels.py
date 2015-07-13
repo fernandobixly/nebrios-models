@@ -145,7 +145,7 @@ class NebriOSModel(object):
     def filter(cls, **kwargs):
         kwargs['kind'] = cls.kind
         kwargs = cleanup_search_kwargs(cls, kwargs)
-        q = Process.objects.get(**kwargs)
+        q = Process.objects.filter(**kwargs)
         return [cls(PROCESS=p) for p in q]
 
     def __str__(self):
