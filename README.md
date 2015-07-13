@@ -5,7 +5,7 @@ This app is intended for use in a NebriOS instance. Visit https://nebrios.com to
 
 ## Setup
 Please ensure that all files are placed in the correct locations over SFTP.
-* `nebriosmodels.py` should be copied to /libraries
+* `libraries/nebriosmodels.py` should be copied to /libraries
 
 ## Usage
 
