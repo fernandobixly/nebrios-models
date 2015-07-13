@@ -29,7 +29,7 @@ class NebriOSField(object):
         self.required = required
 
     def default_value(self):
-        if isinstance(self.default, callable):
+        if callable(self.default):
             return (self.default)()
         else:
             return self.default
@@ -65,6 +65,18 @@ def make_reference_set(model_class, field_name):
     return setter
 
 
+def make_get(field_name):
+    def getter(self):
+        return self.__getitem__(field_name)
+    return getter
+
+
+def make_set(field_name):
+    def setter(self, value):
+        return self.__setitem__(field_name, value)
+    return setter
+
+
 class NebriOSModelMetaClass(type):
 
     def __new__(cls, name, base, attrs):
@@ -72,9 +84,11 @@ class NebriOSModelMetaClass(type):
         for key, value in attrs.iteritems():
             if isinstance(value, NebriOSField):
                 fields[key] = value
-            if isinstance(value, NebriOSReference):
-                attrs[key] = property(make_reference_get(value.model_class, key),
-                                      make_reference_set(value.model_class, key))
+                if isinstance(value, NebriOSReference):
+                    attrs[key] = property(make_reference_get(value.model_class, key),
+                                          make_reference_set(value.model_class, key))
+                else:
+                    attrs[key] = property(make_get(key), make_set(key))
         attrs['__FIELDS__'] = fields
         if 'kind' not in attrs:
             attrs['kind'] = name.lower()
