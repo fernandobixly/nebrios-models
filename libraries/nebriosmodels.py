@@ -1,12 +1,25 @@
 
 
-def get_process(PROCESS=None, PROCESS_ID=None, kind=None):
+def get_process(PROCESS=None, PROCESS_ID=None, PARENT=None, kind=None):
         if PROCESS is not None:
             return PROCESS, False
         elif PROCESS_ID is not None:
             return Process.objects.get(PROCESS_ID=PROCESS_ID, kind=kind), False
         else:
-            return Process.objects.create(kind=kind), True
+            if isinstance(PARENT, NebriOSModel):
+                PARENT = PARENT.process()
+            return Process.objects.create(kind=kind, PARENT=PARENT), True
+
+
+def cleanup_search_kwargs(cls, kwargs):
+    for key, value in kwargs.items():
+        if isinstance(value, NebriOSModel):
+            if key == "PARENT":
+                kwargs[key] = value.process()
+            else:
+                del kwargs[key]
+                kwargs["%s_id"] = value.process().PROCESS_ID
+        return kwargs
 
 
 class NebriOSField(object):
@@ -37,6 +50,7 @@ def make_reference_get(model_class, field_name):
         return model_class(PROCESS_ID=value)
     return getter
 
+
 def make_reference_set(model_class, field_name):
     def setter(self, value):
         if value is None:
@@ -50,6 +64,7 @@ def make_reference_set(model_class, field_name):
         return value
     return setter
 
+
 class NebriOSModelMetaClass(type):
 
     def __new__(cls, name, base, attrs):
@@ -61,6 +76,8 @@ class NebriOSModelMetaClass(type):
                 attrs[key] = property(make_reference_get(value.model_class, key),
                                       make_reference_set(value.model_class, key))
         attrs['__FIELDS__'] = fields
+        if 'kind' not in attrs:
+            attrs['kind'] = name.lower()
         return type.__new__(cls, name, base, attrs)
 
 
@@ -70,10 +87,10 @@ class NebriOSModel(object):
 
     kind = None
 
-    def __init__(self, PROCESS=None, PROCESS_ID=None, **kwargs):
+    def __init__(self, PROCESS=None, PROCESS_ID=None, PARENT=None, **kwargs):
         if self.__class__.kind is None:
             raise Exception('Model kind is None')
-        self.__dict__['PROCESS'], created = get_process(PROCESS=PROCESS, PROCESS_ID=PROCESS_ID,
+        self.__dict__['PROCESS'], created = get_process(PROCESS=PROCESS, PROCESS_ID=PROCESS_ID, PARENT=PARENT,
                                                         kind=self.__class__.kind)
         self.__setitem__('kind', self.__class__.kind)
         if created:
@@ -106,12 +123,14 @@ class NebriOSModel(object):
     @classmethod
     def get(cls, **kwargs):
         kwargs['kind'] = cls.kind
+        kwargs = cleanup_search_kwargs(cls, kwargs)
         p = Process.objects.get(**kwargs)
         return cls(PROCESS=p)
 
     @classmethod
     def filter(cls, **kwargs):
         kwargs['kind'] = cls.kind
+        kwargs = cleanup_search_kwargs(cls, kwargs)
         q = Process.objects.get(**kwargs)
         return [cls(PROCESS=p) for p in q]
 

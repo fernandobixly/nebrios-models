@@ -19,8 +19,6 @@ from nebriosmodels import NebriOSModel, NebriOSField, NebriOSReference
 
 class MyUser(NebriOSModel):
 
-    kind = 'myuser'
-
     username = NebriOSField(required=True)
     password = NebriOSField(required=True)
 
@@ -33,7 +31,6 @@ class MyUser(NebriOSModel):
 
 class MyCar(NebriOSModel):
 
-    kind = 'mycar'
     user = NebriOSReference(MyUser, required=True)
     license_plate = NebriOSField(required=True)
 ```
@@ -60,4 +57,16 @@ Referencing other model instances
 >>> car.save()  # This raises an exception, because the field user is required
 >>> car.user = user
 >>> car.save()
+```
+
+Retrieving model instances
+```
+try:
+    user = User.get(username="testuser")
+    # we can manipulate the object here
+    cars = MyCar.filter(user=user)
+    for car in cars:
+        # We have a list of cars here
+except:
+    # exception thrown if model not found
 ```
