@@ -11,7 +11,7 @@ def get_process(PROCESS=None, PROCESS_ID=None, PARENT=None, kind=None):
             return Process.objects.create(kind=kind, PARENT=PARENT), True
 
 
-def cleanup_search_kwargs(kwargs):
+def cleanup_search_kwargs(cls, kwargs):
     for key, value in kwargs.items():
         if isinstance(value, NebriOSModel) or issubclass(type(value), NebriOSModel):
             if key == "PARENT":
@@ -19,6 +19,12 @@ def cleanup_search_kwargs(kwargs):
             else:
                 del kwargs[key]
                 kwargs["%s_id" % key] = value.process().PROCESS_ID
+        elif key in cls.__FIELDS__:
+            field = cls.__FIELDS__[key]
+            if isinstance(field, NebriOSReference):
+                del kwargs[key]
+                if value is None:
+                    kwargs["%s_id" % key] = None
     return kwargs
 
 
@@ -171,14 +177,14 @@ class NebriOSModel(object):
     @classmethod
     def get(cls, **kwargs):
         kwargs['kind'] = cls.kind
-        kwargs = cleanup_search_kwargs(kwargs)
+        kwargs = cleanup_search_kwargs(cls, kwargs)
         p = Process.objects.get(**kwargs)
         return cls(PROCESS=p)
 
     @classmethod
     def filter(cls, **kwargs):
         kwargs['kind'] = cls.kind
-        kwargs = cleanup_search_kwargs(kwargs)
+        kwargs = cleanup_search_kwargs(cls, kwargs)
         q = Process.objects.filter(**kwargs)
         return [cls(PROCESS=p) for p in q]
 
