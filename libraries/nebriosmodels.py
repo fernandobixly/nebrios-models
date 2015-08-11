@@ -11,15 +11,15 @@ def get_process(PROCESS=None, PROCESS_ID=None, PARENT=None, kind=None):
             return Process.objects.create(kind=kind, PARENT=PARENT), True
 
 
-def cleanup_search_kwargs(cls, kwargs):
+def cleanup_search_kwargs(kwargs):
     for key, value in kwargs.items():
-        if isinstance(value, NebriOSModel):
+        if isinstance(value, NebriOSModel) or issubclass(type(value), NebriOSModel):
             if key == "PARENT":
                 kwargs[key] = value.process()
             else:
                 del kwargs[key]
-                kwargs["%s_id"] = value.process().PROCESS_ID
-        return kwargs
+                kwargs["%s_id" % key] = value.process().PROCESS_ID
+    return kwargs
 
 
 class NebriOSField(object):
@@ -29,7 +29,9 @@ class NebriOSField(object):
         self.required = required
 
     def default_value(self):
-        if callable(self.default):
+        if self.default is None:
+            return self.default
+        elif callable(self.default):
             return (self.default)()
         else:
             return self.default
@@ -106,45 +108,77 @@ class NebriOSModel(object):
             raise Exception('Model kind is None')
         self.__dict__['PROCESS'], created = get_process(PROCESS=PROCESS, PROCESS_ID=PROCESS_ID, PARENT=PARENT,
                                                         kind=self.__class__.kind)
-        self.__setitem__('kind', self.__class__.kind)
+        setattr(self, 'kind', self.__class__.kind)
         if created:
             for key, field in self.__class__.__FIELDS__.iteritems():
-                self.__setitem__(key, field.default_value())
+                setattr(self, key, field.default_value())
         for key, value in kwargs.iteritems():
-            self.__setitem__(key, value)
+            setattr(self, key, value)
 
     def process(self):
         return self.__dict__['PROCESS']
 
     def __setattr__(self, key, value):
+        field = self.__class__.__FIELDS__.get(key, None)
+        if field is not None:
+            if isinstance(field, NebriOSReference):
+                if value is None:
+                    return self.process().__setattr__("%s_id" % key, value)
+                return self.process().__setattr__("%s_id" % key, value.PROCESS_ID)
         return self.process().__setattr__(key, value)
 
     def __getattr__(self, item):
+        field = self.__class__.__FIELDS__.get(item, None)
+        if field is not None:
+            if isinstance(field, NebriOSReference):
+                value = self.process().__getattr__("%s_id" % item)
+                if value is None:
+                    return None
+                model_class = field.model_class
+                return model_class(PROCESS_ID=value)
         return self.process().__getattr__(item)
 
     def __setitem__(self, key, value):
+        field = self.__class__.__FIELDS__.get(key, None)
+        if field is not None:
+            if isinstance(field, NebriOSReference):
+                if value is None:
+                    return self.process().__setitem__("%s_id" % key, value)
+                return self.process().__setitem__("%s_id" % key, value.PROCESS_ID)
         return self.process().__setitem__(key, value)
 
     def __getitem__(self, item):
+        field = self.__class__.__FIELDS__.get(item, None)
+        if field is not None:
+            if isinstance(field, NebriOSReference):
+                value = self.process().__getitem__("%s_id" % item)
+                if value is None:
+                    return None
+                model_class = field.model_class
+                return model_class(PROCESS_ID=value)
         return self.process().__getitem__(item)
 
     def save(self):
         for key, field in self.__class__.__FIELDS__.iteritems():
-            if field.required and (not self.__getitem__(key)):
-                raise Exception("Field %s is required" % key)
+            if field.required and (getattr(self, key) is None):
+                default_value = field.default_value()
+                if default_value is not None:
+                    setattr(self, key, default_value)
+                else:
+                    raise Exception("Field %s is required" % key)
         return self.process().save()
 
     @classmethod
     def get(cls, **kwargs):
         kwargs['kind'] = cls.kind
-        kwargs = cleanup_search_kwargs(cls, kwargs)
+        kwargs = cleanup_search_kwargs(kwargs)
         p = Process.objects.get(**kwargs)
         return cls(PROCESS=p)
 
     @classmethod
     def filter(cls, **kwargs):
         kwargs['kind'] = cls.kind
-        kwargs = cleanup_search_kwargs(cls, kwargs)
+        kwargs = cleanup_search_kwargs(kwargs)
         q = Process.objects.filter(**kwargs)
         return [cls(PROCESS=p) for p in q]
 
