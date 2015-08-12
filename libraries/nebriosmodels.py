@@ -174,6 +174,9 @@ class NebriOSModel(object):
                     raise Exception("Field %s is required" % key)
         return self.process().save()
 
+    def delete(self):
+        self.process().delete()
+
     @classmethod
     def get(cls, **kwargs):
         kwargs['kind'] = cls.kind
