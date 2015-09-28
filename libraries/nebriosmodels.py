@@ -1,14 +1,15 @@
 
 
 def get_process(PROCESS=None, PROCESS_ID=None, PARENT=None, kind=None):
-        if PROCESS is not None:
-            return PROCESS, False
-        elif PROCESS_ID is not None:
-            return Process.objects.get(PROCESS_ID=PROCESS_ID, kind=kind), False
-        else:
-            if isinstance(PARENT, NebriOSModel):
-                PARENT = PARENT.process()
-            return Process.objects.create(kind=kind, PARENT=PARENT), True
+    # returns a PROCESS object and created boolean
+    if PROCESS is not None:
+        return PROCESS, False
+    elif PROCESS_ID is not None:
+        return Process.objects.get(PROCESS_ID=PROCESS_ID, kind=kind), False
+    else:
+        if isinstance(PARENT, NebriOSModel):
+            PARENT = PARENT.process()
+        return Process.objects.create(kind=kind, PARENT=PARENT), True
 
 
 def cleanup_search_kwargs(cls, kwargs):
@@ -17,11 +18,15 @@ def cleanup_search_kwargs(cls, kwargs):
             if key == "PARENT":
                 kwargs[key] = value.process()
             else:
+                # value is another object
+                # update key to an id field to make searchable
                 del kwargs[key]
                 kwargs["%s_id" % key] = value.process().PROCESS_ID
         elif key in cls.__FIELDS__:
             field = cls.__FIELDS__[key]
             if isinstance(field, NebriOSReference):
+                # we need this check here in case there isn't a referenced object
+                # as it won't be picked up by the if
                 del kwargs[key]
                 if value is None:
                     kwargs["%s_id" % key] = None
@@ -46,6 +51,7 @@ class NebriOSField(object):
 class NebriOSReference(NebriOSField):
 
     def __init__(self, model_class, default=None, required=False):
+        # set up the field default and required attrs first
         super(NebriOSReference, self).__init__(default=default, required=required)
         self.model_class = model_class
 
@@ -61,10 +67,12 @@ def make_reference_get(model_class, field_name):
 
 def make_reference_set(model_class, field_name):
     def setter(self, value):
+        # value is the referenced object
         if value is None:
             self.__setitem__('%s_id' % field_name, None)
             return None
         if not isinstance(value, model_class):
+            # ensure the value matches the class for this reference field
             raise Exception("%s not a valid %s for field %s", value, model_class.__name__, field_name)
         if not isinstance(value.PROCESS_ID, int) and not isinstance(value.PROCESS_ID, long):
             value.save()
@@ -91,8 +99,11 @@ class NebriOSModelMetaClass(type):
         fields = {}
         for key, value in attrs.iteritems():
             if isinstance(value, NebriOSField):
+                # every field must be an instance of NebriOSField
                 fields[key] = value
                 if isinstance(value, NebriOSReference):
+                    # if this field is a reference, we need different setter and getter
+                    # functions
                     attrs[key] = property(make_reference_get(value.model_class, key),
                                           make_reference_set(value.model_class, key))
                 else:
@@ -112,65 +123,89 @@ class NebriOSModel(object):
     def __init__(self, PROCESS=None, PROCESS_ID=None, PARENT=None, **kwargs):
         if self.__class__.kind is None:
             raise Exception('Model kind is None')
+        # get or create the process for this model and set up the dictionary for later reference
         self.__dict__['PROCESS'], created = get_process(PROCESS=PROCESS, PROCESS_ID=PROCESS_ID, PARENT=PARENT,
                                                         kind=self.__class__.kind)
         setattr(self, 'kind', self.__class__.kind)
         if created:
             for key, field in self.__class__.__FIELDS__.iteritems():
+                # set any default values
                 setattr(self, key, field.default_value())
         for key, value in kwargs.iteritems():
+            # set values that were passed with **kwargs
             setattr(self, key, value)
 
     def process(self):
+        # return the dictionary representation of this Process
         return self.__dict__['PROCESS']
 
     def __setattr__(self, key, value):
+        # try to get the model field named key
+        # this is for reference fields
         field = self.__class__.__FIELDS__.get(key, None)
         if field is not None:
             if isinstance(field, NebriOSReference):
                 if value is None:
                     return self.process().__setattr__("%s_id" % key, value)
+                # set a pointer to the referenced process
                 return self.process().__setattr__("%s_id" % key, value.PROCESS_ID)
+        # set the key in the Process ORM KVP Bag to value
         return self.process().__setattr__(key, value)
 
     def __getattr__(self, item):
+        # try to get the model field named key
+        # this is for reference fields
         field = self.__class__.__FIELDS__.get(item, None)
         if field is not None:
             if isinstance(field, NebriOSReference):
+                # this is a reference. find the entry for this id in the process __dict__
                 value = self.process().__getattr__("%s_id" % item)
                 if value is None:
                     return None
                 model_class = field.model_class
                 return model_class(PROCESS_ID=value)
+        # we'll check the process __dict__ for item, so it doesn't matter if
+        # item is a field or not
         return self.process().__getattr__(item)
 
     def __setitem__(self, key, value):
+        # try to get the model field named key
+        # this is for reference fields
         field = self.__class__.__FIELDS__.get(key, None)
         if field is not None:
             if isinstance(field, NebriOSReference):
                 if value is None:
                     return self.process().__setitem__("%s_id" % key, value)
+                # set a pointer to the referenced process
                 return self.process().__setitem__("%s_id" % key, value.PROCESS_ID)
+        # set the key in the Process ORM KVP Bag to value
         return self.process().__setitem__(key, value)
 
     def __getitem__(self, item):
+        # try to get the model field named item
+        # this is for reference fields
         field = self.__class__.__FIELDS__.get(item, None)
         if field is not None:
             if isinstance(field, NebriOSReference):
+                # this is a reference. find the entry for this id in the process __dict__
                 value = self.process().__getitem__("%s_id" % item)
                 if value is None:
                     return None
                 model_class = field.model_class
                 return model_class(PROCESS_ID=value)
+        # we'll check the process __dict__ for item, so it doesn't matter if
+        # item is a field or not
         return self.process().__getitem__(item)
 
     def save(self):
         for key, field in self.__class__.__FIELDS__.iteritems():
             if field.required and (getattr(self, key) is None):
+                # if this field is required and its value isn't specified, set default
                 default_value = field.default_value()
                 if default_value is not None:
                     setattr(self, key, default_value)
                 else:
+                    # this field is required and does not have a default value set
                     raise Exception("Field %s is required" % key)
         return self.process().save()
 
@@ -179,13 +214,31 @@ class NebriOSModel(object):
 
     @classmethod
     def get(cls, **kwargs):
+        # set the kind kvp so we can filter by model in Processes
         kwargs['kind'] = cls.kind
         kwargs = cleanup_search_kwargs(cls, kwargs)
         p = Process.objects.get(**kwargs)
         return cls(PROCESS=p)
 
     @classmethod
+    def get_or_create(cls, **kwargs):
+        # set the kind kvp so we can filter by the correct model
+        # and save this as a Process, if needed
+        kwargs['kind'] = cls.kind
+        kwargs = cleanup_search_kwargs(cls, kwargs)
+        try:
+            # try to find a matching Process first
+            p = Process.objects.get(**kwargs)
+            return cls(PROCESS=p), False
+        except Process.DoesNotExist:
+            # otherwise, try to create with the given arguments
+            p = cls(**kwargs)
+            p.save()
+            return p, True
+
+    @classmethod
     def filter(cls, **kwargs):
+        # set the kind kvp so we can filter by model in our Processes
         kwargs['kind'] = cls.kind
         kwargs = cleanup_search_kwargs(cls, kwargs)
         q = Process.objects.filter(**kwargs)
