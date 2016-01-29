@@ -33,6 +33,88 @@ def cleanup_search_kwargs(cls, kwargs):
     return kwargs
 
 
+class NebriOSModelCollection(object):
+
+    def __init__(self, field_name, model_instance, model_class):
+        self.field_name = field_name
+        self.model_instance = model_instance
+        self.model_class = model_class
+
+    def __len__(self):
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            return 0
+        return len(tmp_list)
+
+    def __getitem__(self, key):
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            return None
+        else:
+            return self.model_class(PROCESS_ID=tmp_list[key])
+
+    def __setitem__(self, key, value):
+        if not isinstance(value, self.model_class):
+            raise Exception("%s not a valid %s for field %s" % (value, self.model_class.__name__, self.field_name))
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            tmp_list = [value.PROCESS_ID]
+        else:
+            tmp_list[key] = value.PROCESS_ID
+        self.model_instance.__setitem__('%s_ids' % self.field_name, tmp_list)
+
+    def __delitem__(self, key):
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            tmp_list = []
+        else:
+            del tmp_list[key]
+        self.model_instance.__setitem__('%s_ids' % self.field_name, tmp_list)
+
+    def __iter__(self):
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            raise StopIteration
+        else:
+            for item in tmp_list:
+                yield self.model_class(PROCESS_ID=item)
+
+    def __contains__(self, item):
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            return False
+        else:
+            if isinstance(item, self.model_class):
+                return item.PROCESS_ID in tmp_list
+            elif isinstance(item, int) or isinstance(item, long):
+                return item in tmp_list
+            else:
+                return False
+
+    def __repr__(self):
+        return str(self)
+
+    def __str__(self):
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            return '[]'
+        else:
+            verbose_list = []
+            for index, item_id in enumerate(tmp_list):
+                verbose_list.append(str(self.__getitem__(index)))
+            return '[%s]' % ', '.join(verbose_list)
+
+    def append(self, value):
+        if not isinstance(value, self.model_class):
+            raise Exception("%s not a valid %s for field %s" % (value, self.model_class.__name__, self.field_name))
+        tmp_list = self.model_instance.__getitem__('%s_ids' % self.field_name)
+        if tmp_list is None:
+            tmp_list = [value.PROCESS_ID]
+        else:
+            tmp_list.append(value.PROCESS_ID)
+        self.model_instance.__setitem__('%s_ids' % self.field_name, tmp_list)
+
+
 class NebriOSField(object):
 
     def __init__(self, default=None, required=False):
@@ -56,6 +138,36 @@ class NebriOSReference(NebriOSField):
         self.model_class = model_class
 
 
+class NebriOSReferenceList(NebriOSField):
+
+    def __init__(self, model_class, default=None, required=False):
+        # set up the field default and required attrs first
+        super(NebriOSReferenceList, self).__init__(default=default, required=required)
+        self.model_class = model_class
+
+
+def make_reference_list_get(model_class, field_name):
+    def getter(self):
+        return NebriOSModelCollection(field_name, self, model_class)
+    return getter
+
+
+def make_reference_list_set(model_class, field_name):
+    def setter(self, values):
+        if values is None:
+            self.__setitem__('%s_ids' % field_name, None)
+        collection = NebriOSModelCollection(field_name, self, model_class)
+        for value in values:
+            # ensure all values match the class for this reference list field
+            if not isinstance(value, model_class):
+                raise Exception("%s not a valid %s for field %s" % (value, model_class.__name__, field_name))
+            if not isinstance(value.PROCESS_ID, int) and not isinstance(value.PROCESS_ID, long):
+                value.save()
+            collection.append(value)
+        return collection
+    return setter
+
+
 def make_reference_get(model_class, field_name):
     def getter(self):
         value = self.__getitem__('%s_id' % field_name)
@@ -73,7 +185,7 @@ def make_reference_set(model_class, field_name):
             return None
         if not isinstance(value, model_class):
             # ensure the value matches the class for this reference field
-            raise Exception("%s not a valid %s for field %s", value, model_class.__name__, field_name)
+            raise Exception("%s not a valid %s for field %s" % (value, model_class.__name__, field_name))
         if not isinstance(value.PROCESS_ID, int) and not isinstance(value.PROCESS_ID, long):
             value.save()
         self.__setitem__('%s_id' % field_name, value.PROCESS_ID)
@@ -106,6 +218,9 @@ class NebriOSModelMetaClass(type):
                     # functions
                     attrs[key] = property(make_reference_get(value.model_class, key),
                                           make_reference_set(value.model_class, key))
+                elif isinstance(value, NebriOSReferenceList):
+                    attrs[key] = property(make_reference_list_get(value.model_class, key),
+                                          make_reference_list_set(value.model_class, key))
                 else:
                     attrs[key] = property(make_get(key), make_set(key))
         attrs['__FIELDS__'] = fields
@@ -149,6 +264,10 @@ class NebriOSModel(object):
                     return self.process().__setattr__("%s_id" % key, value)
                 # set a pointer to the referenced process
                 return self.process().__setattr__("%s_id" % key, value.PROCESS_ID)
+            if isinstance(field, NebriOSReferenceList):
+                if value is None:
+                    return self.process().__setattr__("%s_ids" % key, value)
+                return self.process().__setattr__("%s_ids" % key, NebriOSModelCollection(field, self, self.__class__))
         # set the key in the Process ORM KVP Bag to value
         return self.process().__setattr__(key, value)
 
@@ -164,6 +283,11 @@ class NebriOSModel(object):
                     return None
                 model_class = field.model_class
                 return model_class(PROCESS_ID=value)
+            if isinstance(field, NebriOSReferenceList):
+                value = self.process().__getattr__("%s_ids" % item)
+                if value is None:
+                    return []
+                return NebriOSModelCollection(field, self, self.__class__)
         # we'll check the process __dict__ for item, so it doesn't matter if
         # item is a field or not
         return self.process().__getattr__(item)
@@ -178,6 +302,10 @@ class NebriOSModel(object):
                     return self.process().__setitem__("%s_id" % key, value)
                 # set a pointer to the referenced process
                 return self.process().__setitem__("%s_id" % key, value.PROCESS_ID)
+            if isinstance(field, NebriOSReferenceList):
+                if value is None:
+                    return self.process().__setitem__("%s_ids" % key, value)
+                return self.process().__setitem__("%s_ids" % key, NebriOSModelCollection(field, self, self.__class__))
         # set the key in the Process ORM KVP Bag to value
         return self.process().__setitem__(key, value)
 
@@ -193,6 +321,11 @@ class NebriOSModel(object):
                     return None
                 model_class = field.model_class
                 return model_class(PROCESS_ID=value)
+            if isinstance(field, NebriOSReferenceList):
+                value = self.process().__getitem__("%s_ids" % item)
+                if value is None:
+                    return []
+                return NebriOSModelCollection(field, self, self.__class__)
         # we'll check the process __dict__ for item, so it doesn't matter if
         # item is a field or not
         return self.process().__getitem__(item)
